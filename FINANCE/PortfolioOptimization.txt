@@ -1,0 +1,141 @@
+#Notes: Assume that the risk-free rate is 0.
+
+import wrds
+import numpy as np
+import pandas as pd
+import datetime
+import matplotlib.pyplot as plt
+
+df=wrds.Connection() #connects to wrds
+assets=df.get_table(library='ff',table='factors_monthly') #reads wrds data in
+assets=assets[assets.date>=datetime.date(1927,1,1)] #keeps only obs after January 1927
+assets.index=np.arange(1,len(assets)+1) #re-formats index to start at 1
+rmat=np.matrix(pd.concat([assets.mktrf,assets.smb,assets.hml,assets.umd], axis=1)) #puts the returns in a matrix
+
+np.random.seed(123)
+
+#Full Sample IOS no short-sale constraints#
+M=rmat.shape[0] #Number of rows in rmat
+N=rmat.shape[1] #number of columns (assets) in rmat
+u1=np.matrix(np.ones(M)).T #unit vector
+mu0=rmat.T*u1/M #sample mu vector
+sigma0=(rmat-mu0.T).T*(rmat-mu0.T)/(M-1) #sample covariance matrix
+un=np.matrix(np.ones(N)).T #(Nx1) vector of 1s
+A=un.T*sigma0**(-1)*un #coefficient A in characteristic function
+B=un.T*sigma0**(-1)*mu0 #coefficient B in characteristic function
+C=mu0.T*sigma0**(-1)*mu0 #coefficient C in characteristic function
+G=A*C-B**2 #coefficient G in characteristic function
+gmv_sd=np.sqrt(1/A) #SD of global minimum variance portfolio
+grid0=np.matrix(np.arange(gmv_sd,0.20/np.sqrt(12),(0.20/np.sqrt(12)-gmv_sd)/100)).T #Creates grid for plot
+sdsq=np.matrix(np.multiply(grid0,grid0)) #squares the grid
+erp_p0=(-(-2*B)+np.sqrt((-2*B)**2-4*np.multiply(A,(C-np.multiply(G,sdsq)))))/(2*A) #Quadratic formula for IOS
+erp_m0=(-(-2*B)-np.sqrt((-2*B)**2-4*np.multiply(A,(C-np.multiply(G,sdsq)))))/(2*A) #quadratic formula for IOS
+msrw0=(sigma0**(-1)*mu0)/(un.T*sigma0**(-1)*mu0) #mas Sharpe ratio portfolio weights
+msr0_mu=msrw0.T*mu0 #max Sharpe ratio portfolio expected return
+msr0_sd=np.sqrt(msrw0.T*sigma0*msrw0) #max Sharpe ratio portfoli SD
+gmvw0=(sigma0**(-1)*un)/(un.T*sigma0**(-1)*un) #global min var portfolio weights
+gmv0_mu=gmvw0.T*mu0 #global min var expected return
+gmv0_sd=np.sqrt(gmvw0.T*sigma0*gmvw0) #global min var portfolio SD
+#plots the IOS
+plt.plot(grid0*np.sqrt(12),erp_p0*12,grid0*np.sqrt(12),erp_m0*12,color='black')
+plt.xlim(0.,0.20)
+plt.title("IOS")
+plt.xlabel("Standard deviation (annualized)")
+plt.ylabel("Expected return (annualized)")
+plt.show()
+
+#Simulating efficient frontier
+nsim=5000
+simmat=np.zeros((nsim+1,len(sdsq)))
+simmat[0,:]=erp_p0.T
+
+i=1
+while i<=nsim:
+    rmat=np.random.multivariate_normal([0.00647156, 0.002099  , 0.0036788 , 0.00661721],sigma0,M)
+    M=rmat.shape[0]
+    N=rmat.shape[1]
+    u1=np.matrix(np.ones(M)).T #unit vector
+    mu=rmat.T*u1/M #mu vector
+    sigma=(rmat-mu.T).T*(rmat-mu.T)/(M-1)
+    un=np.matrix(np.ones(N)).T
+    A=un.T*sigma**(-1)*un
+    B=un.T*sigma**(-1)*mu
+    C=mu.T*sigma**(-1)*mu
+    G=A*C-B**2
+    gmv_sd=np.sqrt(1/A)
+    grid=np.matrix(np.arange(gmv_sd,0.20/np.sqrt(12),(0.20/np.sqrt(12)-gmv_sd)/100)).T
+    sdsq=np.matrix(np.multiply(grid,grid))
+    erp_p=(-(-2*B)+np.sqrt((-2*B)**2-4*np.multiply(A,(C-np.multiply(G,sdsq)))))/(2*A)
+    simmat[i,:]=erp_p.T
+    plt.plot(grid*np.sqrt(12),erp_p*12,linewidth=0.1)
+    i=i+1
+plt.plot(grid0*np.sqrt(12),erp_p0*12,color='black',linewidth=3)
+plt.xlim(0.,0.20)
+plt.ylim(0,0.20)
+plt.title("IOS")
+plt.xlabel("Standard deviation (annualized)")
+plt.ylabel("Expected return (annualized)")
+plt.show()
+
+#re-sampled Sharpe ratios
+nsim=5000
+simmat=np.zeros((nsim+1,2))
+simmat[0,0]=msr0_sd
+simmat[0,1]=msr0_mu
+
+i=1
+while i<=nsim:
+    rmat=np.random.multivariate_normal([0.00647156, 0.002099  , 0.0036788 , 0.00661721],sigma0,M)
+    M=rmat.shape[0]
+    N=rmat.shape[1]
+    u1=np.matrix(np.ones(M)).T #unit vector
+    un=np.matrix(np.ones(N)).T
+    mu=rmat.T*u1/M #mu vector
+    sigma=(rmat-mu.T).T*(rmat-mu.T)/(M-1)
+    msrw=(sigma**(-1)*mu)/(un.T*sigma**(-1)*mu)
+    msr_mu=msrw.T*mu0
+    msr_sd=np.sqrt(msrw.T*sigma0*msrw)
+    simmat[i,0]=msr_sd
+    simmat[i,1]=msr_mu
+    plt.plot(msr_sd*np.sqrt(12),msr_mu*12,color='green',marker='o', markersize=0.5)
+    i=i+1
+plt.plot(msr0_sd*np.sqrt(12),msr0_mu*12,color='black',marker='o')
+plt.xlim(0.058,0.09)
+plt.ylim(0.05,0.08)
+plt.title("Re-sampled MSR portfolios in Mean_SD space")
+plt.xlabel("Standard deviation (annualized)")
+plt.ylabel("Expected return (annualized)")
+plt.show()
+
+#re-sampled GMV portfolios
+nsim=5000
+simmat=np.zeros((nsim+1,2))
+simmat[0,0]=msr0_sd
+simmat[0,1]=msr0_mu
+
+i=1
+while i<=nsim:
+    rmat=np.random.multivariate_normal([0.00647156, 0.002099  , 0.0036788 , 0.00661721],sigma0,M)
+    M=rmat.shape[0]
+    N=rmat.shape[1]
+    u1=np.matrix(np.ones(M)).T #unit vector
+    un=np.matrix(np.ones(N)).T
+    mu=rmat.T*u1/M #mu vector
+    sigma=(rmat-mu.T).T*(rmat-mu.T)/(M-1)
+    gmvw=(sigma**(-1)*un)/(un.T*sigma**(-1)*un)
+    gmv_mu=gmvw.T*mu0
+    gmv_sd=np.sqrt(gmvw.T*sigma0*gmvw)
+    simmat[i,0]=gmv_sd
+    simmat[i,1]=gmv_mu
+    plt.plot(gmv_sd*np.sqrt(12),gmv_mu*12,color='green',marker='o', markersize=0.5)
+    i=i+1
+plt.plot(gmv0_sd*np.sqrt(12),gmv0_mu*12,color='black',marker='o')
+plt.xlim(0.0595,0.0603)
+plt.ylim(0.05,0.056)
+plt.title("Re-sampled GMV portfolios in Mean-SD space")
+plt.xlabel("Standard deviation (annualized)")
+plt.ylabel("Expected return (annualized)")
+plt.show()
+    
+    
+    
